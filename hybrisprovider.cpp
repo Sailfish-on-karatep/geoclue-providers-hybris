@@ -64,6 +64,7 @@ const quint32 PreferredInitialFixTime = 0;
 
 const int MaxXtraServers = 3;
 const QString XtraConfigFile = QStringLiteral("/etc/gps_xtra.ini");
+const int NtpRetryInterval = 10000;
 
 void gnssXtraDownloadRequest()
 {
@@ -493,7 +494,14 @@ void HybrisProvider::timerEvent(QTimerEvent *event)
         m_fixLostTimer.stop();
         setStatus(StatusAcquiring);
     } else if (event->timerId() == m_ntpRetryTimer.timerId()) {
-        sendNtpRequest();
+        if (m_ntpServers.isEmpty()) {
+            // Nothing was learnt from the network manager yet, so ask it again
+            // rather than re-sending to an empty server list.
+            m_ntpRetryTimer.stop();
+            injectUtcTime();
+        } else {
+            sendNtpRequest();
+        }
     } else {
         QObject::timerEvent(event);
     }
@@ -585,15 +593,20 @@ void HybrisProvider::injectUtcTime()
 {
     qCDebug(lcGeoclueHybris) << "Time injection requested";
 
+    // Both early returns arm the retry timer: a D-Bus activated provider can be
+    // asked for time before connman has been queried, and giving up then means
+    // time is never injected for the life of the process.
     NetworkService *service = m_networkManager->defaultRoute();
     if (!service) {
-        qCDebug(lcGeoclueHybris) << "No default network service";
+        qCDebug(lcGeoclueHybris) << "No default network service, retrying";
+        m_ntpRetryTimer.start(NtpRetryInterval, this);
         return;
     }
 
     m_ntpServers = service->timeservers();
     if (m_ntpServers.isEmpty()) {
-        qCDebug(lcGeoclueHybris) << service->name() << "doesn't advertise time servers";
+        qCDebug(lcGeoclueHybris) << service->name() << "doesn't advertise time servers, retrying";
+        m_ntpRetryTimer.start(NtpRetryInterval, this);
         return;
     } else {
         qCDebug(lcGeoclueHybris) << "Available time servers:" << m_ntpServers;
