@@ -405,8 +405,12 @@ void HybrisProvider::SetOptions(const QVariantMap &options)
 
         quint32 updateInterval = minimumRequestedUpdateInterval();
 
-        m_backend->gnssSetPositionMode(m_agpsEnabled ? HYBRIS_GNSS_POSITION_MODE_MS_BASED
-                                                     : HYBRIS_GNSS_POSITION_MODE_STANDALONE,
+        // MS_BASED only when assistance can actually be delivered: m_agpsEnabled
+        // says the provider is enabled at all, so keying the mode off it asks for
+        // assisted mode even with online aGPS off, and some engines then wait for
+        // assistance that cannot arrive.
+        m_backend->gnssSetPositionMode(m_agpsOnlineEnabled ? HYBRIS_GNSS_POSITION_MODE_MS_BASED
+                                                           : HYBRIS_GNSS_POSITION_MODE_STANDALONE,
                                        HYBRIS_GNSS_POSITION_RECURRENCE_PERIODIC, updateInterval,
                                        PreferredAccuracy, PreferredInitialFixTime);
     }
@@ -1038,8 +1042,10 @@ void HybrisProvider::startPositioningIfNeeded()
                          this, SLOT(injectPosition(int,int,double,double,double,Accuracy)));
     }
 
-    if (!m_backend->gnssSetPositionMode(m_agpsEnabled ? HYBRIS_GNSS_POSITION_MODE_MS_BASED
-                                                      : HYBRIS_GNSS_POSITION_MODE_STANDALONE,
+    // See the note at the other gnssSetPositionMode() call: assisted mode is
+    // only requested when online aGPS is actually available.
+    if (!m_backend->gnssSetPositionMode(m_agpsOnlineEnabled ? HYBRIS_GNSS_POSITION_MODE_MS_BASED
+                                                            : HYBRIS_GNSS_POSITION_MODE_STANDALONE,
                                         HYBRIS_GNSS_POSITION_RECURRENCE_PERIODIC,
                                         minimumRequestedUpdateInterval(),
                                         PreferredAccuracy, PreferredInitialFixTime)) {
