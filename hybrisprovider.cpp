@@ -71,6 +71,33 @@ void gnssXtraDownloadRequest()
     QMetaObject::invokeMethod(staticProvider, "xtraDownloadRequest", Qt::QueuedConnection);
 }
 
+// The position mode is otherwise keyed off m_agpsEnabled, which is assigned
+// from hybrisEnabled() -- whether the provider is enabled at all, not whether
+// assistance can be delivered. It is therefore always true while the provider
+// runs, so MS_BASED is unconditional and STANDALONE is unreachable.
+//
+// That matters on an adaptation with no SUPL data connection: in MS_BASED the
+// modem asks the network for assistance and waits. On karatep it repeats
+// QMI_LOC_EVENT_WIFI_REQ_IND_V02 and QMI_LOC_EVENT_INJECT_TIME_REQ_IND_V02,
+// nothing answers, and mEngineOn stays 0 for the whole session -- no engine
+// state indication, no SV info, no NMEA.
+//
+//   GEOCLUE_HYBRIS_POSITION_MODE=standalone   force STANDALONE
+//   GEOCLUE_HYBRIS_POSITION_MODE=msb          force MS_BASED
+//
+// Unset keeps the existing behaviour, so this is inert unless a device opts in.
+HybrisGnssPositionMode positionMode(bool agpsEnabled)
+{
+    const QByteArray mode = qgetenv("GEOCLUE_HYBRIS_POSITION_MODE");
+    if (mode == "standalone")
+        return HYBRIS_GNSS_POSITION_MODE_STANDALONE;
+    if (mode == "msb")
+        return HYBRIS_GNSS_POSITION_MODE_MS_BASED;
+
+    return agpsEnabled ? HYBRIS_GNSS_POSITION_MODE_MS_BASED
+                       : HYBRIS_GNSS_POSITION_MODE_STANDALONE;
+}
+
 }
 
 QDBusArgument &operator<<(QDBusArgument &argument, const Accuracy &accuracy)
@@ -406,8 +433,7 @@ void HybrisProvider::SetOptions(const QVariantMap &options)
 
         quint32 updateInterval = minimumRequestedUpdateInterval();
 
-        m_backend->gnssSetPositionMode(m_agpsEnabled ? HYBRIS_GNSS_POSITION_MODE_MS_BASED
-                                                     : HYBRIS_GNSS_POSITION_MODE_STANDALONE,
+        m_backend->gnssSetPositionMode(positionMode(m_agpsEnabled),
                                        HYBRIS_GNSS_POSITION_RECURRENCE_PERIODIC, updateInterval,
                                        PreferredAccuracy, PreferredInitialFixTime);
     }
@@ -1051,8 +1077,7 @@ void HybrisProvider::startPositioningIfNeeded()
                          this, SLOT(injectPosition(int,int,double,double,double,Accuracy)));
     }
 
-    if (!m_backend->gnssSetPositionMode(m_agpsEnabled ? HYBRIS_GNSS_POSITION_MODE_MS_BASED
-                                                      : HYBRIS_GNSS_POSITION_MODE_STANDALONE,
+    if (!m_backend->gnssSetPositionMode(positionMode(m_agpsEnabled),
                                         HYBRIS_GNSS_POSITION_RECURRENCE_PERIODIC,
                                         minimumRequestedUpdateInterval(),
                                         PreferredAccuracy, PreferredInitialFixTime)) {
