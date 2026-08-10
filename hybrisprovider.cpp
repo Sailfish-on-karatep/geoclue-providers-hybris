@@ -957,7 +957,17 @@ void HybrisProvider::technologiesChanged()
 
 void HybrisProvider::stateChanged(NetworkManager::State state)
 {
-    if (state == NetworkManager::OnlineState && m_gpsStarted) {
+    // ConnMan only reaches OnlineState once its captive-portal probe against
+    // Ipv4StatusUrl returns 204. That probe fails on plenty of working networks
+    // -- a firewalled LAN, a tethered link, anywhere the check host is
+    // unreachable -- leaving a perfectly usable connection stuck in ReadyState.
+    //
+    // Waiting for OnlineState to fetch XTRA and NTP therefore means a device
+    // with working internet silently never gets predicted orbits or an injected
+    // clock, and every fix is a cold start: minutes rather than seconds. Both
+    // are plain HTTP GETs whose failure is harmless and retried, so ReadyState
+    // is a good enough gate for attempting them.
+    if (state >= NetworkManager::ReadyState && m_gpsStarted) {
         if (m_useForcedXtraInject) {
             gnssXtraDownloadRequest();
         }
@@ -1093,7 +1103,7 @@ void HybrisProvider::startPositioningIfNeeded()
 
     m_gpsStarted = true;
 
-    if (m_networkManager->globalState() == NetworkManager::OnlineState) {
+    if (m_networkManager->globalState() >= NetworkManager::ReadyState) {  // see stateChanged()
         if (m_useForcedXtraInject) {
             gnssXtraDownloadRequest();
         }
